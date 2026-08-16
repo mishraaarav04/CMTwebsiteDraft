@@ -14,6 +14,11 @@
 //   SECTION 7: mount() helper
 //   SECTION 8: PANNABLE VIEWPORT — a fixed-size window you click-and-drag to
 //                                   pan around a larger block (Google-Maps style)
+//   SECTION 9: SECTION (page band) — a full-bleed background band with a
+//                                     centered, max-width content column
+//   SECTION 10: TREE NODE POPUP — click any tree node to open a shared modal
+//                                   (label + body text + placeholder image)
+//   SECTION 11: BUTTON          — a little block, clickable, no-op by default
 // ============================================================================
 
 
@@ -125,6 +130,38 @@ export function createTextBox(
   return box;
 }
 
+// createRichText: like createTextBox, but content is an array of plain
+// strings and/or { text, style } segments, each rendered as its own <span>.
+// Use it for mixed-style runs within one line — e.g. a heading that's
+// mostly one color/weight except for a single italicized, differently
+// colored word.
+export interface TextSegment {
+  text: string;
+  style?: BlockStyle;
+}
+
+export function createRichText(
+  segments: (string | TextSegment)[],
+  style: BlockStyle = {},
+  tag: keyof HTMLElementTagNameMap = "div"
+): HTMLElement {
+  const box = document.createElement(tag);
+  box.classList.add("bf-text-box", "bf-rich-text");
+  box.style.boxSizing = "border-box";
+  applyStyle(box, style);
+  segments.forEach((seg) => {
+    if (typeof seg === "string") {
+      box.appendChild(document.createTextNode(seg));
+      return;
+    }
+    const span = document.createElement("span");
+    span.textContent = seg.text;
+    applyStyle(span, seg.style ?? {});
+    box.appendChild(span);
+  });
+  return box;
+}
+
 
 // ----------------------------------------------------------------------------
 // SECTION 4: IMAGE BLOCK (little block)
@@ -226,8 +263,37 @@ export function createColumns(
 // couple an `id` and list extra links via the `connections` option on
 // createTree; those get drawn as dashed lines overlaid on the whole tree
 // after it's on the page.
+//
+// PER-LEVEL SIZING:
+// Pass `levelStyles` on createTree to override the style at specific
+// depths — index 0 is the root, index 1 is its children, and so on. Handy
+// for making the root visually bigger than everything under it. Depths
+// past the end of the array just keep the base `style`.
+//
+// CLICK-TO-OPEN DETAIL:
+// Every node opens a shared popup when clicked (label + body text + a
+// placeholder image slot) — see SECTION 10. Give a node `detail` text to
+// customize the popup body; otherwise it falls back to generic placeholder
+// copy built from the node's own label.
+//
+// FLOATING NODES:
+// Sometimes a node relates to *several* things at once and forcing it to
+// pick one real parent would misrepresent the other relationships. Instead
+// of nesting it in `def` at all, list it under `floatingNodes` on
+// createTree with an `anchorId` — it renders outside the hierarchy
+// entirely, vertically aligned with whichever real node that anchor id
+// points to (i.e. "the same row as"), positioned just to that anchor's
+// right. Wire it up to whatever it relates to using `connections` (below),
+// same as any other cross-branch line.
+//
+// CROSS-BRANCH LINE STYLE:
+// Each connection can be `style: "straight"` (default, a direct diagonal
+// line) or `style: "elbow"` (a right-angle path — horizontal, then
+// vertical, then horizontal). Elbow reads better when the two ends sit in
+// roughly the same row, since it avoids cutting diagonally across the real
+// hierarchy lines in between.
 // ----------------------------------------------------------------------------
-export type TreePerson = string | number | { id: string; label: string | number };
+export type TreePerson = string | number | { id: string; label: string | number; detail?: string };
 
 export interface TreeCouple {
   couple: TreePerson[]; // exactly 2 people sharing one slot in the tree
@@ -247,6 +313,16 @@ export interface TreeConnection {
   to: string;
   color?: string;
   dashed?: boolean; // defaults to true — dashed reads as "not a direct parent/child line"
+  style?: "straight" | "elbow"; // "straight" (default) = direct line; "elbow" = right-angle path
+}
+
+// A node rendered outside the normal parent/child hierarchy entirely,
+// aligned to the same row as `anchorId`'s node. See "FLOATING NODES" above.
+export interface FloatingTreeNode {
+  person: TreePerson;
+  anchorId: string; // id of the real tree node whose row this should align with
+  offsetX?: string; // horizontal gap from the anchor's right edge, default "40px"
+  offsetY?: string; // vertical nudge from the anchor's top edge, default "0px" — negative moves up
 }
 
 export interface TreeStyle extends BlockStyle {
@@ -254,6 +330,8 @@ export interface TreeStyle extends BlockStyle {
   levelGap?: string; // distance a connector line travels between generations, e.g. "60px"
   orientation?: "vertical" | "horizontal"; // vertical: root top-center, grows down. horizontal: root center-left, grows right.
   connections?: TreeConnection[]; // extra, non-hierarchical lines between ids
+  levelStyles?: BlockStyle[]; // per-depth style overrides, layered on top of the base style — index 0 is the root
+  floatingNodes?: FloatingTreeNode[]; // nodes rendered outside the hierarchy, row-aligned to an anchor
 }
 
 function isCouple(value: TreeNodeValue): value is TreeCouple {
@@ -266,6 +344,10 @@ function personLabel(p: TreePerson): string {
 
 function personId(p: TreePerson): string {
   return typeof p === "object" ? p.id : String(p);
+}
+
+function personDetail(p: TreePerson): string | undefined {
+  return typeof p === "object" ? p.detail : undefined;
 }
 
 export function createTree(def: TreeNodeDef, style: TreeStyle = {}): HTMLElement {
@@ -292,8 +374,13 @@ export function createTree(def: TreeNodeDef, style: TreeStyle = {}): HTMLElement
   rootList.appendChild(buildTreeNode(def, style, orientation, idMap));
   container.appendChild(rootList);
 
-  if (style.connections && style.connections.length > 0) {
-    scheduleConnectionDrawing(container, idMap, style.connections);
+  const hasFloating = (style.floatingNodes?.length ?? 0) > 0;
+  const hasConnections = (style.connections?.length ?? 0) > 0;
+  if (hasFloating || hasConnections) {
+    // Floating nodes have to exist (and be in idMap) before connections are
+    // drawn, since a connection might point at one — so both are scheduled
+    // together, in order, on the same "container is on the page" wait.
+    scheduleTreeExtras(container, idMap, style);
   }
 
   return container;
@@ -303,7 +390,8 @@ function buildTreeNode(
   def: TreeNodeDef,
   style: TreeStyle,
   orientation: "vertical" | "horizontal",
-  idMap: Map<string, HTMLElement>
+  idMap: Map<string, HTMLElement>,
+  depth: number = 0
 ): HTMLElement {
   let value: TreeNodeValue;
   let children: TreeNodeDef[] = [];
@@ -315,11 +403,21 @@ function buildTreeNode(
     value = def;
   }
 
+  // Layer this depth's override (if any) on top of the base style — e.g.
+  // levelStyles[0] makes the root bigger without touching every other node.
+  const levelOverride = style.levelStyles?.[depth];
+  const nodeStyle = levelOverride ? { ...style, ...levelOverride } : style;
+
   const li = document.createElement("li");
   if (orientation === "horizontal") li.classList.add("bf-tree-horizontal");
 
   const nodeEl = document.createElement("div");
   nodeEl.classList.add("bf-tree-node");
+
+  const wireClickToOpen = (el: HTMLElement, person: TreePerson) => {
+    el.style.cursor = "pointer";
+    el.addEventListener("click", () => openTreeNodePopup(personLabel(person), personDetail(person)));
+  };
 
   if (isCouple(value)) {
     nodeEl.classList.add("bf-tree-couple");
@@ -328,7 +426,8 @@ function buildTreeNode(
       const personEl = document.createElement("div");
       personEl.classList.add("bf-tree-person");
       personEl.textContent = personLabel(person);
-      applyStyle(personEl, style);
+      applyStyle(personEl, nodeStyle);
+      wireClickToOpen(personEl, person);
       idMap.set(personId(person), personEl);
       nodeEl.appendChild(personEl);
     });
@@ -338,7 +437,8 @@ function buildTreeNode(
   } else {
     nodeEl.classList.add("bf-tree-person");
     nodeEl.textContent = personLabel(value);
-    applyStyle(nodeEl, style);
+    applyStyle(nodeEl, nodeStyle);
+    wireClickToOpen(nodeEl, value);
     idMap.set(personId(value), nodeEl);
   }
 
@@ -347,33 +447,77 @@ function buildTreeNode(
   if (children.length > 0) {
     const ul = document.createElement("ul");
     if (orientation === "horizontal") ul.classList.add("bf-tree-horizontal");
-    children.forEach((child) => ul.appendChild(buildTreeNode(child, style, orientation, idMap)));
+    children.forEach((child) => ul.appendChild(buildTreeNode(child, style, orientation, idMap, depth + 1)));
     li.appendChild(ul);
   }
 
   return li;
 }
 
-// Draws the extra, non-hierarchical connection lines (e.g. two branches
-// marrying into each other) as an SVG overlay. Waits until the tree is
-// actually attached to the page, since it needs real layout positions —
-// then keeps the lines aligned on window resize.
-function scheduleConnectionDrawing(
-  container: HTMLElement,
-  idMap: Map<string, HTMLElement>,
-  connections: TreeConnection[]
-): void {
-  const draw = () => drawConnections(container, idMap, connections);
+// Places floating nodes and draws the extra, non-hierarchical connection
+// lines (e.g. two branches marrying into each other, or a floating node
+// reaching into the tree) as an SVG overlay. Waits until the tree is
+// actually attached to the page, since both need real layout positions —
+// then keeps everything aligned on window resize.
+function scheduleTreeExtras(container: HTMLElement, idMap: Map<string, HTMLElement>, style: TreeStyle): void {
+  const run = () => {
+    if (style.floatingNodes && style.floatingNodes.length > 0) {
+      placeFloatingNodes(container, idMap, style.floatingNodes, style);
+    }
+    if (style.connections && style.connections.length > 0) {
+      drawConnections(container, idMap, style.connections);
+    }
+  };
 
   const tryStart = () => {
     if (container.isConnected) {
-      draw();
-      window.addEventListener("resize", draw);
+      run();
+      window.addEventListener("resize", run);
     } else {
       requestAnimationFrame(tryStart);
     }
   };
   requestAnimationFrame(tryStart);
+}
+
+// Renders each floating node (creating it the first time, just repositioning
+// on later calls) at its anchor's vertical position, offset to the right.
+function placeFloatingNodes(
+  container: HTMLElement,
+  idMap: Map<string, HTMLElement>,
+  floating: FloatingTreeNode[],
+  baseStyle: TreeStyle
+): void {
+  const containerRect = container.getBoundingClientRect();
+
+  floating.forEach((f) => {
+    const anchor = idMap.get(f.anchorId);
+    if (!anchor) {
+      console.warn(`bf tree floating node: could not find anchor id "${f.anchorId}"`);
+      return;
+    }
+    const anchorRect = anchor.getBoundingClientRect();
+    const top = anchorRect.top - containerRect.top + container.scrollTop + parseFloat(f.offsetY ?? "0");
+    const left =
+      anchorRect.right - containerRect.left + container.scrollLeft + parseFloat(f.offsetX ?? "40");
+
+    const id = personId(f.person);
+    let el = idMap.get(id);
+    if (!el) {
+      el = document.createElement("div");
+      el.classList.add("bf-tree-person", "bf-tree-floating");
+      el.textContent = personLabel(f.person);
+      applyStyle(el, baseStyle);
+      el.style.position = "absolute";
+      el.style.zIndex = "2"; // stays above .bf-tree-connections, same layer as real tree nodes
+      el.style.cursor = "pointer";
+      el.addEventListener("click", () => openTreeNodePopup(personLabel(f.person), personDetail(f.person)));
+      container.appendChild(el);
+      idMap.set(id, el);
+    }
+    el.style.top = `${top}px`;
+    el.style.left = `${left}px`;
+  });
 }
 
 function drawConnections(
@@ -392,6 +536,7 @@ function drawConnections(
   svg.setAttribute("height", String(container.scrollHeight));
 
   const containerRect = container.getBoundingClientRect();
+  const svgNS = "http://www.w3.org/2000/svg";
 
   connections.forEach((conn) => {
     const fromEl = idMap.get(conn.from);
@@ -407,15 +552,32 @@ function drawConnections(
     const x2 = toRect.left - containerRect.left + container.scrollLeft + toRect.width / 2;
     const y2 = toRect.top - containerRect.top + container.scrollTop + toRect.height / 2;
 
-    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("x1", String(x1));
-    line.setAttribute("y1", String(y1));
-    line.setAttribute("x2", String(x2));
-    line.setAttribute("y2", String(y2));
-    line.setAttribute("stroke", conn.color ?? "#c98a3f");
-    line.setAttribute("stroke-width", "2");
-    if (conn.dashed !== false) line.setAttribute("stroke-dasharray", "6 4");
-    svg!.appendChild(line);
+    const stroke = conn.color ?? "#c98a3f";
+    const dashed = conn.dashed !== false;
+
+    if (conn.style === "elbow") {
+      // horizontal -> vertical -> horizontal, so it reads as a deliberate
+      // "reaches over and connects" line rather than a diagonal cutting
+      // across whatever's in between.
+      const midX = (x1 + x2) / 2;
+      const path = document.createElementNS(svgNS, "path");
+      path.setAttribute("d", `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", stroke);
+      path.setAttribute("stroke-width", "2");
+      if (dashed) path.setAttribute("stroke-dasharray", "6 4");
+      svg!.appendChild(path);
+    } else {
+      const line = document.createElementNS(svgNS, "line");
+      line.setAttribute("x1", String(x1));
+      line.setAttribute("y1", String(y1));
+      line.setAttribute("x2", String(x2));
+      line.setAttribute("y2", String(y2));
+      line.setAttribute("stroke", stroke);
+      line.setAttribute("stroke-width", "2");
+      if (dashed) line.setAttribute("stroke-dasharray", "6 4");
+      svg!.appendChild(line);
+    }
   });
 }
 
@@ -498,4 +660,158 @@ export function createPannableViewport(content: HTMLElement, style: PannableStyl
   viewport.addEventListener("pointercancel", stopDragging);
 
   return viewport;
+}
+
+
+// ----------------------------------------------------------------------------
+// SECTION 9: SECTION (page band)
+//
+// BIG BLOCK stays deliberately plain — it just reserves space and is always
+// exactly as wide as its parent, which makes it usable anywhere (nested
+// inside a card, a column, another big block, whatever). Full-bleed,
+// edge-to-edge background bands are a different, more specific job: a
+// SECTION is what you stack top-to-bottom down a page. Its background runs
+// the full width of the viewport, while its content is capped at a max
+// width and centered — the classic "colored band, centered column" pattern.
+//
+// Use createSection() for page-level bands; use createBigBlock() for
+// everything you nest inside one (or anywhere else you just need a
+// same-width-as-parent container).
+// ----------------------------------------------------------------------------
+export interface SectionStyle extends BlockStyle {
+  maxWidth?: string; // width cap for the inner content column (default "1080px")
+  contentPadding?: string; // padding applied to the inner content column (default "56px 24px")
+}
+
+export function createSection(
+  children: HTMLElement[] = [],
+  style: SectionStyle = {},
+  direction: "row" | "column" = "column"
+): HTMLElement {
+  const outer = document.createElement("div");
+  outer.classList.add("bf-section");
+  outer.style.boxSizing = "border-box";
+  outer.style.width = "100%";
+  if (style.background) outer.style.background = style.background;
+  else if (style.backgroundColor) outer.style.backgroundColor = style.backgroundColor;
+
+  const inner = createBigBlock(children, {
+    gap: style.gap,
+    alignItems: style.alignItems,
+    justifyContent: style.justifyContent,
+    padding: style.contentPadding ?? "56px 24px",
+  }, direction);
+  inner.classList.add("bf-section-inner");
+  inner.style.maxWidth = style.maxWidth ?? "1080px";
+  inner.style.marginLeft = "auto";
+  inner.style.marginRight = "auto";
+
+  outer.appendChild(inner);
+  return outer;
+}
+
+
+// ----------------------------------------------------------------------------
+// SECTION 10: TREE NODE POPUP
+//
+// One modal, created lazily and reused for every open. Every tree node (see
+// SECTION 6) wires itself up to call openTreeNodePopup() on click, passing
+// its own label + optional detail text. Layout is title + placeholder image
+// box + body text — swap the placeholder box for a real <img> later without
+// touching any tree code.
+// ----------------------------------------------------------------------------
+let treePopupEls: { backdrop: HTMLElement; title: HTMLElement; body: HTMLElement } | null = null;
+
+function ensureTreeNodePopup(): { backdrop: HTMLElement; title: HTMLElement; body: HTMLElement } {
+  if (treePopupEls) return treePopupEls;
+
+  const backdrop = document.createElement("div");
+  backdrop.classList.add("bf-popup-backdrop");
+  backdrop.style.cssText =
+    "position:fixed; inset:0; background:rgba(20,20,20,0.45); display:none; align-items:center; " +
+    "justify-content:center; z-index:1000; padding:24px; box-sizing:border-box;";
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) closeTreeNodePopup();
+  });
+
+  const card = document.createElement("div");
+  card.classList.add("bf-popup-card");
+  card.style.cssText =
+    "background:#ffffff; border-radius:16px; max-width:420px; width:100%; max-height:85vh; overflow:auto; " +
+    "padding:28px; box-shadow:0 20px 60px rgba(0,0,0,0.25); position:relative; box-sizing:border-box;";
+  card.addEventListener("click", (e) => e.stopPropagation());
+
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "✕";
+  closeBtn.setAttribute("aria-label", "Close");
+  closeBtn.style.cssText =
+    "position:absolute; top:14px; right:14px; border:none; background:transparent; font-size:16px; " +
+    "cursor:pointer; line-height:1; padding:6px; color:#666;";
+  closeBtn.addEventListener("click", closeTreeNodePopup);
+
+  const image = document.createElement("div");
+  image.classList.add("bf-popup-image");
+  image.style.cssText =
+    "width:100%; height:160px; border:2px dashed #c3c8d2; border-radius:10px; display:flex; " +
+    "align-items:center; justify-content:center; color:#8890a0; font-size:13px; margin-bottom:16px; box-sizing:border-box;";
+  image.textContent = "Image placeholder";
+
+  const title = document.createElement("div");
+  title.classList.add("bf-popup-title");
+  title.style.cssText = "font-size:22px; font-weight:700; margin:0 0 10px; padding-right:24px;";
+
+  const body = document.createElement("div");
+  body.classList.add("bf-popup-body");
+  body.style.cssText = "font-size:14px; line-height:1.6; color:#444;";
+
+  card.append(closeBtn, image, title, body);
+  backdrop.appendChild(card);
+  document.body.appendChild(backdrop);
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeTreeNodePopup();
+  });
+
+  treePopupEls = { backdrop, title, body };
+  return treePopupEls;
+}
+
+function openTreeNodePopup(label: string, detail?: string): void {
+  const { backdrop, title, body } = ensureTreeNodePopup();
+  title.textContent = label;
+  body.textContent = detail ?? `Body text goes here — a short description of ${label} would go in this spot.`;
+  backdrop.style.display = "flex";
+}
+
+function closeTreeNodePopup(): void {
+  if (treePopupEls) treePopupEls.backdrop.style.display = "none";
+}
+
+
+// ----------------------------------------------------------------------------
+// SECTION 11: BUTTON (little block)
+//
+// A clickable pill button. Pass an onClick handler once you have one to
+// wire up; leave it off for a plain placeholder that doesn't do anything
+// yet but still looks and feels like a real button.
+// ----------------------------------------------------------------------------
+export function createButton(
+  label: string,
+  style: BlockStyle = {},
+  onClick?: () => void
+): HTMLElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.classList.add("bf-button");
+  btn.textContent = label;
+  btn.style.boxSizing = "border-box";
+  btn.style.cursor = "pointer";
+  btn.style.border = "none";
+  btn.style.borderRadius = "999px";
+  btn.style.padding = "14px 28px";
+  btn.style.fontSize = "15px";
+  btn.style.fontWeight = "600";
+  applyStyle(btn, style);
+  if (onClick) btn.addEventListener("click", onClick);
+  return btn;
 }
