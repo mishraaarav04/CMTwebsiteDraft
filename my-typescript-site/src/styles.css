@@ -61,20 +61,27 @@ body {
   --bf-tree-line-color: #b8b8b8;
   --bf-tree-gap: 40px; /* distance a connector line travels between levels */
   position: relative;
-  overflow: auto;
+  /* visible on both axes: setting only one axis to auto forces the browser
+     to compute the other as auto too (per the CSS overflow spec), and an
+     auto/scroll container also starts clipping its absolutely-positioned
+     descendants (the floating node + connector svg) into its scroll size —
+     which is what was producing both scrollbars even though the tree fits.
+     Now that the tree fits its section without needing to scroll, this can
+     just stay visible; revert to overflow-x: auto if a future tree is wide
+     enough to need horizontal scrolling again. */
+  overflow: visible;
   padding: 12px;
 }
 
 /* center the root within the container in each orientation */
 .bf-tree-container-vertical {
   display: flex;
-  /* flex-start (not center): when the tree is wider than its scrollable
-     container, centering makes it overflow symmetrically on both sides —
-     but scrollLeft starts at 0, so the left-side overflow has no way to be
-     scrolled into view and just renders clipped. Left-aligning means the
-     tree's left edge always matches the container's padding edge, so
-     nothing is ever silently cut off. */
-  justify-content: flex-start;
+  /* The tree now fits within its container at normal viewport widths, so it's
+     centered like everything else. If a future change makes it wider than
+     the container again, switch this back to flex-start — centering plus
+     overflow-x: auto silently clips the left side, since scrollLeft starts
+     at 0 and can't go negative to reveal that overflow. */
+  justify-content: center;
 }
 
 .bf-tree-container-horizontal {
@@ -106,7 +113,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 0 12px;
+  padding: 0 6px;
   position: relative;
 }
 

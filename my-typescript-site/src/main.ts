@@ -87,7 +87,7 @@ const theme = {
   // family quote banner gets its own distinct gradient — warm-to-cool
   // instead of the bookends' blue-to-cream, so it doesn't blend in as a
   // third repeat of the same band
-  quoteGradient: "linear-gradient(135deg, #f3e3c9 0%, #ecdde3 50%, #d7dff0 100%)",
+  quoteGradient: "linear-gradient(135deg, #f3e3c9 0%,rgb(229, 212, 183) 30%,rgb(175, 188, 220) 100%)",
 };
 
 // ----------------------------------------------------------------------------
@@ -196,7 +196,7 @@ function buildHeroSection(): HTMLElement {
   const section = createSection(
     [
       badge,
-      heading("All About *CMT*", "56px", { textAlign: "center" }),
+      heading("All About CMT", "56px", { textAlign: "center" }),
       bodyText("The most common inherited neurological disorder you have probably never heard of.", {
         textAlign: "center",
       }),
@@ -224,7 +224,7 @@ function buildHeadingSection(): HTMLElement {
   const intro = createBigBlock(
     [
       eyebrow("The Basics"),
-      heading("What is *CMT*?", "36px"),
+      heading("What is Charcot-Marie-Tooth?", "36px"),
       bodyText(
         "Charcot-Marie-Tooth disease (CMT) is a group of inherited disorders that damage the peripheral nerves — the ones carrying signals between the brain, spinal cord, muscles, and senses. It's the most commonly inherited neurological condition, yet most people have never heard of it."
       ),
@@ -256,7 +256,7 @@ function buildHeadingSection(): HTMLElement {
 
   const statsCard = card(
     [
-      heading("*CMT* by the Numbers", "20px", { textAlign: "center" }),
+      heading("CMT by the Numbers", "20px", { textAlign: "center" }),
       createColumns(stats.map(statRow), stats.length, { gap: "8px" }),
     ],
     { flex: "1", gap: "14px" }
@@ -332,7 +332,7 @@ function buildTypesWithImages(): HTMLElement {
   ];
 
   return createBigBlock(
-    [heading("Different Types of *CMT*", "22px"), ...sections],
+    [heading("Different Types of CMT", "22px"), ...sections],
     { padding: "0", gap: "32px", flex: "1" }
   );
 }
@@ -395,7 +395,7 @@ function buildProgressionTimeline(): HTMLElement {
 
   return createBigBlock(
     [
-      heading("*CMT* Progression Timeline", "22px"),
+      heading("CMT Progression Timeline", "22px"),
       bodyText("Every case moves at its own pace, but most people's experience follows a similar arc."),
       timelineTree,
     ],
@@ -408,7 +408,7 @@ function buildProgressionTimeline(): HTMLElement {
 // ----------------------------------------------------------------------------
 function buildHalfHalfSection(): HTMLElement {
   return createSection([buildTypesWithImages(), buildProgressionTimeline()], {
-    backgroundColor: theme.bandSoft,
+    backgroundColor: theme.bandLight,
     gap: "48px",
     alignItems: "flex-start",
   }, "row");
@@ -681,9 +681,11 @@ function buildSubtypeTree(): HTMLElement {
   const tree = createTree(cmtTreeData, {
     orientation: "vertical",
     lineColor: theme.accent,
-    levelGap: "72px",
+    levelGap: "48px",
     fontFamily: fontSans,
     textColor: theme.ink,
+    fontSize: "12px",
+    padding: "6px 10px",
     floatingNodes: [
       {
         person: {
@@ -707,33 +709,26 @@ function buildSubtypeTree(): HTMLElement {
       { from: "autosomal-dominant", to: "dicmt", style: "elbow", color: theme.accentBlue },
     ],
     // root (depth 0) rendered bigger than every level under it
-    levelStyles: [{ fontFamily: fontSerif, fontSize: "22px", fontWeight: "700", padding: "14px 26px" }],
+    levelStyles: [{ fontFamily: fontSerif, fontSize: "18px", fontWeight: "700", padding: "10px 18px" }],
   });
 
-  // Rendered in full — no drag/pan required. It's wide, so this container
-  // scrolls natively (horizontal, if the viewport's ever too narrow) rather
-  // than relying on click-and-drag, which was intercepting clicks on nodes
-  // often enough to be annoying.
+  // Sized to fit within the section's width without needing to scroll.
   const treeContainer = createBigBlock([tree], {
-    backgroundColor: theme.cardBg,
-    border: `1px solid ${theme.border}`,
-    borderRadius: "12px",
-    padding: "64px 72px",
-    minHeight: "600px",
+    padding: "32px 24px",
+    minHeight: "440px",
   });
-  treeContainer.style.overflowX = "auto";
 
   return createSection(
     [
       eyebrow("Explore the Family Tree"),
-      heading("*CMT* Subtypes", "26px"),
+      heading("CMT Subtypes", "26px"),
       bodyText("Hover any node for a quick preview, or click it for more detail."),
       treeContainer,
     ],
     // wider than the site's usual 1080px cap — the Demyelinating branch
     // (which carries the extra Autosomal Recessive/CMT4 level) needs the
     // extra room so nothing runs past the section's edge
-    { backgroundColor: theme.bandLight, gap: "16px", alignItems: "center", maxWidth: "1400px" }
+    { backgroundColor: theme.bandSoft, gap: "16px", alignItems: "center", maxWidth: "1400px" }
   );
 }
 
@@ -794,8 +789,7 @@ function buildHopeCtaSection(): HTMLElement {
 const page = document.getElementById("app")!;
 mount(buildHeroSection(), page);
 mount(buildHeadingSection(), page);
-mount(buildHalfHalfSection(), page);
-mount(buildFamilyQuoteSection(), page);
-mount(buildSymptomsGrid(), page);
 mount(buildSubtypeTree(), page);
+mount(buildHalfHalfSection(), page);
+mount(buildSymptomsGrid(), page);
 mount(buildHopeCtaSection(), page);
