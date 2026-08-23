@@ -417,7 +417,7 @@ function buildHalfHalfSection(): HTMLElement {
 // ----------------------------------------------------------------------------
 // SECTION 3: "A note from our family" quote banner
 // ----------------------------------------------------------------------------
-function buildFamilyQuoteSection(): HTMLElement {
+/*function buildFamilyQuoteSection(): HTMLElement {
   return createSection(
     [
       eyebrow("Section label goes here"),
@@ -435,7 +435,7 @@ function buildFamilyQuoteSection(): HTMLElement {
     { background: theme.quoteGradient, alignItems: "center", gap: "14px" }
   );
 }
-
+*/
 // ----------------------------------------------------------------------------
 // SECTION 4: Symptoms grid — 2 columns, grows automatically as cards are added
 // ----------------------------------------------------------------------------
