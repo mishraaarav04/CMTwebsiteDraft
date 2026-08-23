@@ -19,6 +19,8 @@
 //   SECTION 10: TREE NODE POPUP — click any tree node to open a shared modal
 //                                   (label + body text + placeholder image)
 //   SECTION 11: BUTTON          — a little block, clickable, no-op by default
+//   SECTION 12: TREE NODE HOVER TOOLTIP — brief preview on hover, hinting
+//                                   that a node is clickable
 // ============================================================================
 
 
@@ -292,8 +294,31 @@ export function createColumns(
 // vertical, then horizontal). Elbow reads better when the two ends sit in
 // roughly the same row, since it avoids cutting diagonally across the real
 // hierarchy lines in between.
+//
+// ALWAYS-VISIBLE BODY TEXT:
+// `detail` only shows up inside the click popup. Give a node a `body`
+// instead (or as well) and that text renders right inside the node box
+// itself, under the label, all the time — no click needed. Handy for
+// something like a timeline where you want the description visible at a
+// glance rather than tucked behind an interaction.
+//
+// HOVER PREVIEW:
+// Every clickable node also shows a small tooltip on hover — label's
+// `detail` (or `body` if there's no `detail`), so people get a hint that
+// there's more to see before they click.
+//
+// POPUP IMAGE:
+// Give a node `image` (a URL) and its popup shows that picture instead of
+// the generic dashed placeholder box — `imageAlt` sets its alt text.
 // ----------------------------------------------------------------------------
-export type TreePerson = string | number | { id: string; label: string | number; detail?: string };
+export type TreePerson = string | number | {
+  id: string;
+  label: string | number;
+  detail?: string;
+  body?: string;
+  image?: string;
+  imageAlt?: string;
+};
 
 export interface TreeCouple {
   couple: TreePerson[]; // exactly 2 people sharing one slot in the tree
@@ -348,6 +373,63 @@ function personId(p: TreePerson): string {
 
 function personDetail(p: TreePerson): string | undefined {
   return typeof p === "object" ? p.detail : undefined;
+}
+
+function personBody(p: TreePerson): string | undefined {
+  return typeof p === "object" ? p.body : undefined;
+}
+
+function personImage(p: TreePerson): string | undefined {
+  return typeof p === "object" ? p.image : undefined;
+}
+
+function personImageAlt(p: TreePerson): string {
+  return (typeof p === "object" && p.imageAlt) || personLabel(p);
+}
+
+// Fills a node element with either just the label (plain, single-line —
+// the default) or label + always-visible body text stacked underneath, when
+// the person has `body` set. `maxWidth` caps the wrap width of that body
+// text — pass a wider value via the tree's own `width` style to make
+// bigger boxes.
+function renderPersonContent(el: HTMLElement, person: TreePerson, maxWidth: string = "260px"): void {
+  const body = personBody(person);
+  if (!body) {
+    el.textContent = personLabel(person);
+    return;
+  }
+
+  el.style.flexDirection = "column";
+  el.style.alignItems = "flex-start";
+  el.style.whiteSpace = "normal";
+  el.style.textAlign = "left";
+  el.style.maxWidth = maxWidth;
+
+  const labelEl = document.createElement("div");
+  labelEl.textContent = personLabel(person);
+  labelEl.style.fontWeight = "700";
+  labelEl.style.marginBottom = "4px";
+
+  const bodyEl = document.createElement("div");
+  bodyEl.textContent = body;
+  bodyEl.style.fontWeight = "400";
+  bodyEl.style.fontSize = "0.82em";
+  bodyEl.style.lineHeight = "1.5";
+  bodyEl.style.opacity = "0.75";
+
+  el.append(labelEl, bodyEl);
+}
+
+// Wires up both interactions every clickable tree node gets: click opens
+// the full popup (SECTION 10), hover shows a brief preview tooltip
+// (SECTION 12) so people know there's more to see before they click.
+function wireNodeInteractions(el: HTMLElement, person: TreePerson): void {
+  el.style.cursor = "pointer";
+  el.addEventListener("click", () =>
+    openTreeNodePopup(personLabel(person), personDetail(person), personImage(person), personImageAlt(person))
+  );
+  el.addEventListener("mouseenter", () => showTreeNodeTooltip(el, personDetail(person) ?? personBody(person)));
+  el.addEventListener("mouseleave", hideTreeNodeTooltip);
 }
 
 export function createTree(def: TreeNodeDef, style: TreeStyle = {}): HTMLElement {
@@ -414,20 +496,15 @@ function buildTreeNode(
   const nodeEl = document.createElement("div");
   nodeEl.classList.add("bf-tree-node");
 
-  const wireClickToOpen = (el: HTMLElement, person: TreePerson) => {
-    el.style.cursor = "pointer";
-    el.addEventListener("click", () => openTreeNodePopup(personLabel(person), personDetail(person)));
-  };
-
   if (isCouple(value)) {
     nodeEl.classList.add("bf-tree-couple");
     const [a, b] = value.couple;
     [a, b].forEach((person) => {
       const personEl = document.createElement("div");
       personEl.classList.add("bf-tree-person");
-      personEl.textContent = personLabel(person);
+      renderPersonContent(personEl, person, nodeStyle.width);
       applyStyle(personEl, nodeStyle);
-      wireClickToOpen(personEl, person);
+      wireNodeInteractions(personEl, person);
       idMap.set(personId(person), personEl);
       nodeEl.appendChild(personEl);
     });
@@ -436,9 +513,9 @@ function buildTreeNode(
     nodeEl.insertBefore(bar, nodeEl.children[1] ?? null);
   } else {
     nodeEl.classList.add("bf-tree-person");
-    nodeEl.textContent = personLabel(value);
+    renderPersonContent(nodeEl, value, nodeStyle.width);
     applyStyle(nodeEl, nodeStyle);
-    wireClickToOpen(nodeEl, value);
+    wireNodeInteractions(nodeEl, value);
     idMap.set(personId(value), nodeEl);
   }
 
@@ -497,21 +574,28 @@ function placeFloatingNodes(
       return;
     }
     const anchorRect = anchor.getBoundingClientRect();
-    const top = anchorRect.top - containerRect.top + container.scrollTop + parseFloat(f.offsetY ?? "0");
-    const left =
-      anchorRect.right - containerRect.left + container.scrollLeft + parseFloat(f.offsetX ?? "40");
+    // clamped to a small positive minimum so a large up/left offset can
+    // never push the node past the container's own top/left edge, where
+    // it'd otherwise get clipped by the container's overflow
+    const top = Math.max(
+      4,
+      anchorRect.top - containerRect.top + container.scrollTop + parseFloat(f.offsetY ?? "0")
+    );
+    const left = Math.max(
+      4,
+      anchorRect.right - containerRect.left + container.scrollLeft + parseFloat(f.offsetX ?? "40")
+    );
 
     const id = personId(f.person);
     let el = idMap.get(id);
     if (!el) {
       el = document.createElement("div");
       el.classList.add("bf-tree-person", "bf-tree-floating");
-      el.textContent = personLabel(f.person);
+      renderPersonContent(el, f.person);
       applyStyle(el, baseStyle);
       el.style.position = "absolute";
       el.style.zIndex = "2"; // stays above .bf-tree-connections, same layer as real tree nodes
-      el.style.cursor = "pointer";
-      el.addEventListener("click", () => openTreeNodePopup(personLabel(f.person), personDetail(f.person)));
+      wireNodeInteractions(el, f.person);
       container.appendChild(el);
       idMap.set(id, el);
     }
@@ -720,16 +804,23 @@ export function createSection(
 // box + body text — swap the placeholder box for a real <img> later without
 // touching any tree code.
 // ----------------------------------------------------------------------------
-let treePopupEls: { backdrop: HTMLElement; title: HTMLElement; body: HTMLElement } | null = null;
+let treePopupEls: {
+  backdrop: HTMLElement;
+  title: HTMLElement;
+  body: HTMLElement;
+  imagePlaceholder: HTMLElement;
+  image: HTMLImageElement;
+} | null = null;
 
-function ensureTreeNodePopup(): { backdrop: HTMLElement; title: HTMLElement; body: HTMLElement } {
+function ensureTreeNodePopup(): NonNullable<typeof treePopupEls> {
   if (treePopupEls) return treePopupEls;
 
   const backdrop = document.createElement("div");
   backdrop.classList.add("bf-popup-backdrop");
   backdrop.style.cssText =
     "position:fixed; inset:0; background:rgba(20,20,20,0.45); display:none; align-items:center; " +
-    "justify-content:center; z-index:1000; padding:24px; box-sizing:border-box;";
+    "justify-content:center; z-index:1000; padding:24px; box-sizing:border-box; " +
+    "opacity:0; transition:opacity 0.18s ease;";
   backdrop.addEventListener("click", (e) => {
     if (e.target === backdrop) closeTreeNodePopup();
   });
@@ -749,12 +840,20 @@ function ensureTreeNodePopup(): { backdrop: HTMLElement; title: HTMLElement; bod
     "cursor:pointer; line-height:1; padding:6px; color:#666;";
   closeBtn.addEventListener("click", closeTreeNodePopup);
 
-  const image = document.createElement("div");
-  image.classList.add("bf-popup-image");
-  image.style.cssText =
+  // Fallback shown when a node has no `image` set — swapped out for the
+  // real <img> below whenever one is available.
+  const imagePlaceholder = document.createElement("div");
+  imagePlaceholder.classList.add("bf-popup-image-placeholder");
+  imagePlaceholder.style.cssText =
     "width:100%; height:160px; border:2px dashed #c3c8d2; border-radius:10px; display:flex; " +
     "align-items:center; justify-content:center; color:#8890a0; font-size:13px; margin-bottom:16px; box-sizing:border-box;";
-  image.textContent = "Image placeholder";
+  imagePlaceholder.textContent = "Image placeholder";
+
+  const image = document.createElement("img");
+  image.classList.add("bf-popup-image");
+  image.style.cssText =
+    "width:100%; height:160px; object-fit:cover; border-radius:10px; margin-bottom:16px; " +
+    "box-sizing:border-box; display:none;";
 
   const title = document.createElement("div");
   title.classList.add("bf-popup-title");
@@ -764,7 +863,7 @@ function ensureTreeNodePopup(): { backdrop: HTMLElement; title: HTMLElement; bod
   body.classList.add("bf-popup-body");
   body.style.cssText = "font-size:14px; line-height:1.6; color:#444;";
 
-  card.append(closeBtn, image, title, body);
+  card.append(closeBtn, imagePlaceholder, image, title, body);
   backdrop.appendChild(card);
   document.body.appendChild(backdrop);
 
@@ -772,19 +871,42 @@ function ensureTreeNodePopup(): { backdrop: HTMLElement; title: HTMLElement; bod
     if (e.key === "Escape") closeTreeNodePopup();
   });
 
-  treePopupEls = { backdrop, title, body };
+  treePopupEls = { backdrop, title, body, imagePlaceholder, image };
   return treePopupEls;
 }
 
-function openTreeNodePopup(label: string, detail?: string): void {
-  const { backdrop, title, body } = ensureTreeNodePopup();
+function openTreeNodePopup(label: string, detail?: string, imageSrc?: string, imageAlt?: string): void {
+  const { backdrop, title, body, imagePlaceholder, image } = ensureTreeNodePopup();
   title.textContent = label;
   body.textContent = detail ?? `Body text goes here — a short description of ${label} would go in this spot.`;
+
+  if (imageSrc) {
+    image.src = imageSrc;
+    image.alt = imageAlt ?? label;
+    image.style.display = "block";
+    imagePlaceholder.style.display = "none";
+  } else {
+    image.style.display = "none";
+    image.removeAttribute("src");
+    imagePlaceholder.style.display = "flex";
+  }
+
   backdrop.style.display = "flex";
+  // force a reflow between setting display and opacity, so the browser
+  // registers the "0" state before we transition to "1" — otherwise both
+  // changes land in the same frame and there's nothing to animate from.
+  void backdrop.offsetWidth;
+  backdrop.style.opacity = "1";
 }
 
 function closeTreeNodePopup(): void {
-  if (treePopupEls) treePopupEls.backdrop.style.display = "none";
+  if (!treePopupEls) return;
+  const { backdrop } = treePopupEls;
+  backdrop.style.opacity = "0";
+  window.setTimeout(() => {
+    // only hide if nothing re-opened it in the meantime
+    if (backdrop.style.opacity === "0") backdrop.style.display = "none";
+  }, 180);
 }
 
 
@@ -814,4 +936,71 @@ export function createButton(
   applyStyle(btn, style);
   if (onClick) btn.addEventListener("click", onClick);
   return btn;
+}
+
+
+// ----------------------------------------------------------------------------
+// SECTION 12: TREE NODE HOVER TOOLTIP
+//
+// One tooltip, created lazily and reused for every hover, same pattern as
+// the popup in SECTION 10. wireNodeInteractions() (SECTION 6) calls this on
+// every tree node's mouseenter/mouseleave — text is a node's `detail` if it
+// has one, else its `body`, trimmed down to a short preview. Purely a hint
+// that the node is clickable; the full text always lives in the popup.
+// ----------------------------------------------------------------------------
+let treeTooltipEl: HTMLElement | null = null;
+
+function ensureTreeNodeTooltip(): HTMLElement {
+  if (treeTooltipEl) return treeTooltipEl;
+
+  const tip = document.createElement("div");
+  tip.classList.add("bf-tree-tooltip");
+  tip.style.cssText =
+    "position:fixed; max-width:220px; background:rgba(20,20,20,0.92); color:#fff; font-size:12px; " +
+    "line-height:1.45; padding:8px 10px; border-radius:8px; pointer-events:none; z-index:1500; " +
+    "display:none; box-shadow:0 6px 18px rgba(0,0,0,0.2);";
+  document.body.appendChild(tip);
+
+  treeTooltipEl = tip;
+  return tip;
+}
+
+function showTreeNodeTooltip(anchorEl: HTMLElement, text?: string): void {
+  const tip = ensureTreeNodeTooltip();
+  const full = text ?? "Click for more detail.";
+  tip.textContent = full.length > 110 ? `${full.slice(0, 107)}…` : full;
+
+  // reset transform before measuring, so a leftover clamp from the last
+  // hover doesn't affect this one's width/position measurement
+  tip.style.transform = "translate(0, 0)";
+  tip.style.left = "0px";
+  tip.style.top = "0px";
+  tip.style.display = "block";
+  const tipRect = tip.getBoundingClientRect();
+
+  const rect = anchorEl.getBoundingClientRect();
+  const margin = 8;
+  const halfWidth = tipRect.width / 2;
+
+  // clamp horizontally so the tooltip can never render off the left or
+  // right edge of the viewport, however close to the tree's own edge the
+  // hovered node is
+  const maxCenterX = Math.max(margin + halfWidth, window.innerWidth - margin - halfWidth);
+  const centerX = Math.min(Math.max(rect.left + rect.width / 2, margin + halfWidth), maxCenterX);
+
+  // prefer above the node; flip below if there's no room above
+  let topY = rect.top - 10;
+  let translateY = "-100%";
+  if (topY - tipRect.height < margin) {
+    topY = rect.bottom + 10;
+    translateY = "0%";
+  }
+
+  tip.style.left = `${centerX}px`;
+  tip.style.top = `${topY}px`;
+  tip.style.transform = `translate(-50%, ${translateY})`;
+}
+
+function hideTreeNodeTooltip(): void {
+  if (treeTooltipEl) treeTooltipEl.style.display = "none";
 }

@@ -11,16 +11,16 @@
 //                      right = symptoms -> diagnosis -> treatment timeline
 //   3. "A note from our family" quote banner (still placeholder — your call)
 //   4. Symptoms grid (2 columns, grows automatically as you add cards)
-//   5. Pannable CMT subtype tree (drag to explore, Google-Maps style)
+//   5. CMT subtype tree, rendered in full (hover to preview, click for detail)
 //   6. "Hope is on the horizon" gene-therapy call-to-action
 // ============================================================================
 import {
   createBigBlock,
   createTextBox,
   createRichText,
+  createImageBlock,
   createColumns,
   createTree,
-  createPannableViewport,
   createSection,
   createButton,
   mount,
@@ -28,6 +28,34 @@ import {
   type TreeNodeDef,
   type TreePerson,
 } from "./blocks.js";
+
+// ----------------------------------------------------------------------------
+// Stock images — all public domain, sourced from Wikimedia Commons (either
+// released to the public domain directly by their creator, or old enough
+// that US copyright has lapsed, e.g. the 1918 edition of Gray's Anatomy).
+// Hotlinked via Commons' Special:FilePath, which always resolves to the
+// current file regardless of hosting changes. No attribution is legally
+// required for public domain works, but the source is noted per image below
+// in case you want to credit it anyway.
+// ----------------------------------------------------------------------------
+const COMMONS = "https://commons.wikimedia.org/wiki/Special:FilePath/";
+const images = {
+  // "Neuron with oligodendrocyte and myelin sheath" — Mariana Ruiz Villarreal
+  // (LadyofHats), released to the public domain
+  myelinSheath: `${COMMONS}Neuron_with_oligodendrocyte_and_myelin_sheath.svg`,
+  // Gray's Anatomy (1918), plate 832 — nerve fiber structure
+  nerveFiber: `${COMMONS}Gray832.png`,
+  // NHGRI (part of NIH) — X chromosome ideogram, public domain US govt work
+  chromosomeX: `${COMMONS}Chromosome_X.svg`,
+  // NHGRI (part of NIH) — DNA double helix, public domain US govt work
+  dnaHelix: `${COMMONS}DNA_Double_Helix_by_NHGRI.jpg`,
+  // Gray's Anatomy (1918), plate 290 — arches of the foot
+  footArches: `${COMMONS}Gray290.png`,
+  // Gray's Anatomy (1918), plate 833 — nerves of the foot
+  footNerves: `${COMMONS}Gray833.png`,
+  // Gray's Anatomy (1918), plate 421 — extensor muscles of the hand
+  handMuscles: `${COMMONS}Gray421.png`,
+};
 
 // ----------------------------------------------------------------------------
 // Design tokens
@@ -48,14 +76,18 @@ const theme = {
   border: "#e4e7ee",
   cardBg: "#ffffff",
   // the live site alternates two pale-blue section backgrounds down the page
-  bandLight: "#f5f8fd",
-  bandSoft: "#e9eff9",
-  sectionAltBg: "#eef1f7",
+  bandLight: "#e5edfb",
+  bandSoft: "#d6e2f5",
+  sectionAltBg: "#e0e7f3",
   placeholderBorder: "#d8c19a",
-  // soft diagonal blue-to-cream wash, used behind the family quote banner
-  quoteGradient: "linear-gradient(135deg, #c8dbf2 0%, #dee4ef 45%, #f5e6c6 100%)",
-  // deeper blue fading to a warm gray-cream, used behind the page hero
-  heroGradient: "linear-gradient(120deg, #c3d9f3 0%, #e2e9f4 45%, #ebe6dd 100%)",
+  // the two "bookend" bands (hero at the top, gene-therapy CTA at the
+  // bottom) share this same blue-to-cream wash, so the page reads as
+  // opening and closing on the same note
+  bookendGradient: "linear-gradient(135deg, #b9d0ef 0%, #cfd9ec 45%, #f0dcae 100%)",
+  // family quote banner gets its own distinct gradient — warm-to-cool
+  // instead of the bookends' blue-to-cream, so it doesn't blend in as a
+  // third repeat of the same band
+  quoteGradient: "linear-gradient(135deg, #f3e3c9 0%, #ecdde3 50%, #d7dff0 100%)",
 };
 
 // ----------------------------------------------------------------------------
@@ -146,32 +178,6 @@ function card(children: HTMLElement[], style: BlockStyle = {}): HTMLElement {
   });
 }
 
-// "Room for a picture" — a placeholder box sized to what the real image
-// should be, with example text inside instead of an actual <img>.
-function imagePlaceholder(width: string, height: string): HTMLElement {
-  return createBigBlock(
-    [
-      createTextBox(`Image placeholder — ${width} × ${height}`, {
-        fontFamily: fontSans,
-        textColor: theme.muted,
-        fontSize: "13px",
-        textAlign: "center",
-      }),
-      createTextBox("Example text here", { fontFamily: fontSans, textColor: theme.muted, fontSize: "12px", textAlign: "center" }),
-    ],
-    {
-      width,
-      height,
-      border: `2px dashed ${theme.placeholderBorder}`,
-      borderRadius: "10px",
-      backgroundColor: theme.sectionAltBg,
-      alignItems: "center",
-      justifyContent: "center",
-      gap: "4px",
-    }
-  );
-}
-
 // ----------------------------------------------------------------------------
 // SECTION 0: Page hero — "All About CMT"
 // ----------------------------------------------------------------------------
@@ -195,7 +201,7 @@ function buildHeroSection(): HTMLElement {
         textAlign: "center",
       }),
     ],
-    { background: theme.heroGradient, alignItems: "center", gap: "20px", contentPadding: "72px 24px" }
+    { background: theme.bookendGradient, alignItems: "center", gap: "20px", contentPadding: "72px 24px" }
   );
 
   section.style.position = "relative";
@@ -272,21 +278,29 @@ function buildTypesWithImages(): HTMLElement {
       eyebrowText: "Demyelinating",
       title: "*CMT1*",
       body: "The most common form of CMT. It damages the myelin sheath that insulates nerve fibers, slowing nerve signals down. Usually autosomal dominant — one copy of the mutated gene is enough to cause it.",
+      image: images.myelinSheath,
+      imageAlt: "Diagram of a neuron showing the myelin sheath wrapped around its axon",
     },
     {
       eyebrowText: "Axonal",
       title: "*CMT2*",
       body: "Damages the nerve fiber (axon) itself rather than its insulation, weakening the signal instead of slowing it. Symptoms often look similar to CMT1 but tend to appear a bit later in life.",
+      image: images.nerveFiber,
+      imageAlt: "Historical anatomical illustration of a nerve fiber, from Gray's Anatomy (1918)",
     },
     {
       eyebrowText: "X-linked",
       title: "*CMTX*",
       body: "Caused by mutations on the X chromosome. Because of this, males and females can experience noticeably different symptom severity, even within the same family.",
+      image: images.chromosomeX,
+      imageAlt: "Diagram of the human X chromosome",
     },
     {
       eyebrowText: "Intermediate",
       title: "*DI-CMT*",
       body: "Shows overlapping features of both demyelinating and axonal forms, which is why it's classified as its own category rather than folded into CMT1 or CMT2.",
+      image: images.dnaHelix,
+      imageAlt: "Illustration of a DNA double helix",
     },
   ];
 
@@ -295,7 +309,13 @@ function buildTypesWithImages(): HTMLElement {
       [eyebrow(data.eyebrowText), heading(data.title, "20px"), bodyText(data.body)],
       { padding: "0", gap: "8px", flex: "1" }
     );
-    const image = imagePlaceholder("200px", "150px");
+    const image = createImageBlock(data.image, data.imageAlt, {
+      width: "200px",
+      height: "150px",
+      borderRadius: "10px",
+      backgroundColor: theme.sectionAltBg,
+      border: `1px solid ${theme.border}`,
+    });
 
     return createBigBlock(
       imageOnLeft ? [image, text] : [text, image],
@@ -326,37 +346,50 @@ function buildChain(labels: TreePerson[]): TreeNodeDef {
 }
 
 function buildProgressionTimeline(): HTMLElement {
-  const stageLabels: TreePerson[] = [
+  // description shows right in the box (via `body`) — no click needed to
+  // read it; `detail` is set to the same text so the popup stays consistent
+  // if someone clicks anyway
+  const stageCopy = [
     {
       id: "stage-symptoms",
       label: "Symptoms Appear",
-      detail: "Body text goes here — a short description of the earliest signs would go in this spot.",
+      text: "Usually shows up in childhood or early adulthood — high arches, hammertoes, frequent tripping, and gradual weakness in the feet and ankles. Because symptoms progress slowly, they're often written off as clumsiness at first.",
     },
     {
       id: "stage-diagnosis",
       label: "Diagnosis",
-      detail: "Body text goes here — a short description of how a diagnosis typically comes together would go in this spot.",
+      text: "Combines a neurological exam, nerve conduction studies or EMG, family history, and genetic testing to confirm the specific subtype. Because CMT is rare and its symptoms overlap with other conditions, diagnosis is often delayed for years.",
     },
     {
       id: "stage-management",
       label: "Management & Care",
-      detail: "Body text goes here — a short description of day-to-day management and care would go in this spot.",
+      text: "Physical and occupational therapy to maintain strength and mobility, orthotics or braces for foot and ankle support, and regular monitoring for progression. There's no way to reverse nerve damage, so care focuses on preserving function.",
     },
     {
       id: "stage-treatment",
       label: "Treatment",
-      detail: "Body text goes here — a short description of current and emerging treatment options would go in this spot.",
+      text: "There's no FDA-approved cure today, so treatment mainly means managing symptoms. Gene therapy research aimed at the disease's genetic root is advancing, though, and is the best current hope for a future disease-modifying treatment.",
     },
   ];
+
+  const stageLabels: TreePerson[] = stageCopy.map((s) => ({
+    id: s.id,
+    label: s.label,
+    body: s.text,
+    detail: s.text,
+  }));
 
   const timelineTree = createTree(buildChain(stageLabels), {
     orientation: "vertical",
     lineColor: theme.accent,
-    levelGap: "36px",
+    levelGap: "56px",
     backgroundColor: theme.cardBg,
     border: `1px solid ${theme.border}`,
     borderRadius: "8px",
     fontFamily: fontSans,
+    fontSize: "17px",
+    padding: "20px 24px",
+    width: "340px",
     textColor: theme.ink,
   });
 
@@ -408,22 +441,59 @@ function buildFamilyQuoteSection(): HTMLElement {
 // ----------------------------------------------------------------------------
 function buildSymptomsGrid(): HTMLElement {
   const symptomData = [
-    { title: "High Arches & Hammertoes", body: "Foot structure changes (pes cavus, hammertoes) are often the earliest visible signs, especially in kids." },
-    { title: "Foot Drop", body: "Weakness in the lower leg muscles can make it hard to lift the front of the foot, leading to tripping and a distinctive high-step gait." },
-    { title: "Muscle Weakness", body: "Starts in the feet and lower legs and can progress to the hands and forearms over time." },
-    { title: "Loss of Sensation", body: "Reduced feeling in the feet and hands makes it easier to miss cuts, blisters, or injuries." },
-    { title: "Balance Problems", body: "Weakness and reduced sensation together make balance harder, leading to frequent trips and falls." },
-    { title: "Hand Weakness", body: "Fine motor tasks like buttoning a shirt or turning a key can become difficult as hand muscles weaken." },
+    {
+      title: "High Arches & Hammertoes",
+      body: "Foot structure changes (pes cavus, hammertoes) are often the earliest visible signs, especially in kids. They happen because the small muscles inside the foot weaken unevenly, pulling the arch and toes out of their usual shape over time.",
+    },
+    {
+      title: "Foot Drop",
+      body: "Weakness in the lower leg muscles can make it hard to lift the front of the foot, leading to tripping and a distinctive high-step gait. Many people compensate by lifting the knee higher than usual with each step, sometimes called a \"steppage gait.\"",
+      image: images.footArches,
+      imageAlt: "Historical anatomical illustration of the arches of the foot, from Gray's Anatomy (1918)",
+    },
+    {
+      title: "Muscle Weakness",
+      body: "Starts in the feet and lower legs and can progress to the hands and forearms over time. Because it develops so gradually, many people adapt without noticing just how much strength they've lost until a specific task becomes difficult.",
+    },
+    {
+      title: "Loss of Sensation",
+      body: "Reduced feeling in the feet and hands makes it easier to miss cuts, blisters, or injuries. Regular self-checks of the skin are important, since an unnoticed wound can go untreated longer than it should.",
+      image: images.footNerves,
+      imageAlt: "Historical anatomical illustration of the nerves of the foot, from Gray's Anatomy (1918)",
+    },
+    {
+      title: "Balance Problems",
+      body: "Weakness and reduced sensation together make balance harder, leading to frequent trips and falls. Physical therapy and supportive footwear can meaningfully reduce fall risk for a lot of people.",
+    },
+    {
+      title: "Hand Weakness",
+      body: "Fine motor tasks like buttoning a shirt or turning a key can become difficult as hand muscles weaken. It usually appears later than foot and leg symptoms, and adaptive tools can make everyday tasks easier.",
+      image: images.handMuscles,
+      imageAlt: "Historical anatomical illustration of the extensor muscles of the hand, from Gray's Anatomy (1918)",
+    },
   ];
 
-  const symptomCard = (data: (typeof symptomData)[number], withImage: boolean) =>
+  const symptomCard = (data: (typeof symptomData)[number]) =>
     card(
-      [heading(data.title, "16px"), bodyText(data.body), ...(withImage ? [imagePlaceholder("100%", "120px")] : [])],
+      [
+        heading(data.title, "15px"),
+        bodyText(data.body, { fontSize: "13px", lineHeight: "20px" }),
+        ...(data.image
+          ? [
+              createImageBlock(data.image, data.imageAlt ?? "", {
+                width: "100%",
+                height: "120px",
+                borderRadius: "10px",
+                backgroundColor: theme.sectionAltBg,
+                border: `1px solid ${theme.border}`,
+              }),
+            ]
+          : []),
+      ],
       { gap: "8px" }
     );
 
-  // alternate which cards get a picture — swap this list any time
-  const cards = symptomData.map((data, i) => symptomCard(data, (i + 1) % 2 === 0));
+  const cards = symptomData.map((data) => symptomCard(data));
 
   // maxItems is computed from the item count, so adding more symptom
   // cards later keeps this a clean 2-column grid automatically.
@@ -441,7 +511,7 @@ function buildSymptomsGrid(): HTMLElement {
 }
 
 // ----------------------------------------------------------------------------
-// SECTION 5: Pannable CMT subtype tree
+// SECTION 5: CMT subtype tree, rendered in full (no drag/pan)
 //
 // Root biggest, then it fans out by pathophysiology, then inheritance
 // pattern, then concrete type/subtype:
@@ -472,6 +542,8 @@ const cmtTreeData: TreeNodeDef = [
     label: "CMT",
     detail:
       "Charcot-Marie-Tooth disease (CMT) is a group of inherited disorders affecting the peripheral nerves. It's classified by two main factors: which part of the nerve is damaged, and how it's inherited.",
+    image: images.dnaHelix,
+    imageAlt: "Illustration of a DNA double helix",
   },
   [
     [
@@ -479,6 +551,8 @@ const cmtTreeData: TreeNodeDef = [
         id: "demyelinating",
         label: "Demyelinating",
         detail: "Damages the myelin sheath — the insulating layer around nerve fibers — which slows down how fast nerve signals travel.",
+        image: images.myelinSheath,
+        imageAlt: "Diagram of a neuron showing the myelin sheath wrapped around its axon",
       },
       [
         [
@@ -486,12 +560,14 @@ const cmtTreeData: TreeNodeDef = [
             id: "cmt1",
             label: "CMT1",
             detail: "The most common category of CMT overall. Demyelinating and usually autosomal dominant.",
+            image: images.myelinSheath,
+            imageAlt: "Diagram of a neuron showing the myelin sheath wrapped around its axon",
           },
           [
             { id: "cmt1a", label: "CMT1A", detail: "Caused by a duplication of the PMP22 gene. The single most common CMT subtype, accounting for close to half of all cases." },
             { id: "cmt1b", label: "CMT1B", detail: "Caused by mutations in the MPZ gene, which makes a key structural protein in myelin." },
             { id: "cmt1c", label: "CMT1C", detail: "Caused by mutations in the LITAF gene." },
-            "CMT1D",
+            { id: "cmt1d", label: "CMT1D", detail: "Caused by mutations in the EGR2 gene. Rarer than CMT1A-C, but follows the same demyelinating, dominant pattern." },
           ],
         ],
         [
@@ -499,6 +575,8 @@ const cmtTreeData: TreeNodeDef = [
             id: "autosomal-recessive",
             label: "Autosomal Recessive",
             detail: "Both copies of the gene — one from each parent — need to carry the mutation for the condition to appear. Often more severe and earlier-onset than dominant forms.",
+            image: images.dnaHelix,
+            imageAlt: "Illustration of a DNA double helix",
           },
           [
             [
@@ -506,10 +584,12 @@ const cmtTreeData: TreeNodeDef = [
                 id: "cmt4",
                 label: "CMT4",
                 detail: "Demyelinating and autosomal recessive. Generally more severe, with earlier onset than CMT1.",
+                image: images.myelinSheath,
+                imageAlt: "Diagram of a neuron showing the myelin sheath wrapped around its axon",
               },
               [
                 { id: "cmt4a", label: "CMT4A", detail: "Caused by mutations in the GDAP1 gene. One of the more common autosomal recessive CMT subtypes." },
-                "CMT4B1",
+                { id: "cmt4b1", label: "CMT4B1", detail: "Caused by mutations in the MTMR2 gene. Can also involve early weakness in the vocal cords and diaphragm alongside the limbs." },
               ],
             ],
           ],
@@ -521,6 +601,8 @@ const cmtTreeData: TreeNodeDef = [
         id: "axonal",
         label: "Axonal",
         detail: "Damages the nerve fiber (axon) itself rather than its insulation, weakening the signal instead of slowing it down.",
+        image: images.nerveFiber,
+        imageAlt: "Historical anatomical illustration of a nerve fiber, from Gray's Anatomy (1918)",
       },
       [
         [
@@ -528,11 +610,13 @@ const cmtTreeData: TreeNodeDef = [
             id: "cmt2",
             label: "CMT2",
             detail: "The second most common category. Axonal and usually autosomal dominant, with symptoms that can look similar to CMT1 but often appear a bit later.",
+            image: images.nerveFiber,
+            imageAlt: "Historical anatomical illustration of a nerve fiber, from Gray's Anatomy (1918)",
           },
           [
             { id: "cmt2a", label: "CMT2A", detail: "Caused by mutations in the MFN2 gene. The most common axonal (CMT2) subtype." },
             { id: "cmt2b", label: "CMT2B", detail: "Caused by mutations in the RAB7A gene — notable for causing prominent loss of sensation and skin ulcers." },
-            "CMT2E",
+            { id: "cmt2e", label: "CMT2E", detail: "Caused by mutations in the NEFL gene, which builds part of the nerve fiber's internal structural framework." },
           ],
         ],
       ],
@@ -542,6 +626,8 @@ const cmtTreeData: TreeNodeDef = [
         id: "intermediate",
         label: "Intermediate",
         detail: "Shows overlapping features of both demyelinating and axonal CMT, which is why it's classified as its own category.",
+        image: images.dnaHelix,
+        imageAlt: "Illustration of a DNA double helix",
       },
       [
         [
@@ -549,8 +635,13 @@ const cmtTreeData: TreeNodeDef = [
             id: "dicmt",
             label: "DI-CMT",
             detail: "Dominant Intermediate CMT — shows a mix of demyelinating and axonal nerve damage rather than fitting cleanly into either category.",
+            image: images.dnaHelix,
+            imageAlt: "Illustration of a DNA double helix",
           },
-          ["DI-CMTA", "DI-CMTB"],
+          [
+            { id: "dicmta", label: "DI-CMTA", detail: "One of the more common intermediate forms — researchers are still narrowing down its exact genetic cause in some families." },
+            { id: "dicmtb", label: "DI-CMTB", detail: "Caused by mutations in the DNM2 gene — the same gene implicated in some axonal (CMT2) subtypes." },
+          ],
         ],
       ],
     ],
@@ -559,6 +650,8 @@ const cmtTreeData: TreeNodeDef = [
         id: "xlinked",
         label: "X-linked",
         detail: "Caused by mutations on the X chromosome. Severity often differs between males and females, even within the same family.",
+        image: images.chromosomeX,
+        imageAlt: "Diagram of the human X chromosome",
       },
       [
         [
@@ -566,10 +659,12 @@ const cmtTreeData: TreeNodeDef = [
             id: "cmtx",
             label: "CMTX",
             detail: "X-linked inheritance. CMTX1 is by far the most common form.",
+            image: images.chromosomeX,
+            imageAlt: "Diagram of the human X chromosome",
           },
           [
             { id: "cmtx1", label: "CMTX1", detail: "Caused by mutations in the GJB1 gene (connexin-32). The most common X-linked CMT subtype — males are often affected more severely than females." },
-            "(TBD)",
+            { id: "cmtx6", label: "CMTX6", detail: "Caused by mutations in the PDK3 gene. Considerably rarer than CMTX1." },
           ],
         ],
       ],
@@ -586,12 +681,18 @@ function buildSubtypeTree(): HTMLElement {
   const tree = createTree(cmtTreeData, {
     orientation: "vertical",
     lineColor: theme.accent,
-    levelGap: "48px",
+    levelGap: "72px",
     fontFamily: fontSans,
     textColor: theme.ink,
     floatingNodes: [
       {
-        person: { id: "autosomal-dominant", label: "Autosomal Dominant", detail: autosomalDominantDetail },
+        person: {
+          id: "autosomal-dominant",
+          label: "Autosomal Dominant",
+          detail: autosomalDominantDetail,
+          image: images.dnaHelix,
+          imageAlt: "Illustration of a DNA double helix",
+        },
         anchorId: "autosomal-recessive",
         // nudged from a dead-even row-align with Autosomal Recessive — the
         // original nudge was 20px left / 24px up; this is 3x that up-left,
@@ -609,23 +710,30 @@ function buildSubtypeTree(): HTMLElement {
     levelStyles: [{ fontFamily: fontSerif, fontSize: "22px", fontWeight: "700", padding: "14px 26px" }],
   });
 
-  const viewport = createPannableViewport(tree, {
-    width: "100%",
-    height: "480px",
+  // Rendered in full — no drag/pan required. It's wide, so this container
+  // scrolls natively (horizontal, if the viewport's ever too narrow) rather
+  // than relying on click-and-drag, which was intercepting clicks on nodes
+  // often enough to be annoying.
+  const treeContainer = createBigBlock([tree], {
     backgroundColor: theme.cardBg,
     border: `1px solid ${theme.border}`,
     borderRadius: "12px",
-    padding: "32px",
+    padding: "64px 72px",
+    minHeight: "600px",
   });
+  treeContainer.style.overflowX = "auto";
 
   return createSection(
     [
       eyebrow("Explore the Family Tree"),
       heading("*CMT* Subtypes", "26px"),
-      bodyText("Click any node for more detail, or click and drag inside the box below to explore the full tree."),
-      viewport,
+      bodyText("Hover any node for a quick preview, or click it for more detail."),
+      treeContainer,
     ],
-    { backgroundColor: theme.bandLight, gap: "16px", alignItems: "center" }
+    // wider than the site's usual 1080px cap — the Demyelinating branch
+    // (which carries the extra Autosomal Recessive/CMT4 level) needs the
+    // extra room so nothing runs past the section's edge
+    { backgroundColor: theme.bandLight, gap: "16px", alignItems: "center", maxWidth: "1400px" }
   );
 }
 
@@ -665,7 +773,7 @@ function buildHopeCtaSection(): HTMLElement {
       ),
       buttons,
     ],
-    { backgroundColor: theme.bandSoft, alignItems: "center", gap: "20px", contentPadding: "72px 24px" }
+    { background: theme.bookendGradient, alignItems: "center", gap: "20px", contentPadding: "72px 24px" }
   );
 
   section.style.position = "relative";

@@ -68,7 +68,13 @@ body {
 /* center the root within the container in each orientation */
 .bf-tree-container-vertical {
   display: flex;
-  justify-content: center;
+  /* flex-start (not center): when the tree is wider than its scrollable
+     container, centering makes it overflow symmetrically on both sides —
+     but scrollLeft starts at 0, so the left-side overflow has no way to be
+     scrolled into view and just renders clipped. Left-aligning means the
+     tree's left edge always matches the container's padding edge, so
+     nothing is ever silently cut off. */
+  justify-content: flex-start;
 }
 
 .bf-tree-container-horizontal {
